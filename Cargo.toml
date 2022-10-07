@@ -1,0 +1,9 @@
+[package]
+name = "seducee"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+dashmap = "5.4.0"
+tokio = { version = "1.21.2", features = ["full"] }
+tower-lsp = { version = "0.17.0", features = ["proposed"] }
