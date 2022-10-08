@@ -1141,26 +1141,10 @@ impl LanguageServer for Backend {
                 text_document_sync: Some(TextDocumentSyncCapability::Kind(
                     TextDocumentSyncKind::FULL,
                 )),
-                completion_provider: Some(CompletionOptions {
-                    resolve_provider: Some(false),
-                    trigger_characters: Some(vec![":".to_string()]),
-                    work_done_progress_options: Default::default(),
-                    all_commit_characters: None,
-                    completion_item: None,
-                }),
-                semantic_tokens_provider: None,
                 definition_provider: Some(OneOf::Left(true)),
                 references_provider: Some(OneOf::Left(true)),
                 rename_provider: Some(OneOf::Left(true)),
-                signature_help_provider: Some(SignatureHelpOptions {
-                    trigger_characters: None,
-                    retrigger_characters: None,
-                    work_done_progress_options: WorkDoneProgressOptions {
-                        work_done_progress: None,
-                    },
-                }),
                 document_highlight_provider: Some(OneOf::Left(true)),
-                document_symbol_provider: Some(OneOf::Left(true)),
                 document_formatting_provider: Some(OneOf::Left(true)),
                 ..ServerCapabilities::default()
             },
@@ -1194,17 +1178,6 @@ impl LanguageServer for Backend {
     async fn did_close(&self, params: DidCloseTextDocumentParams) {
         let uri = params.text_document.uri.as_str();
         self.programs.remove(uri);
-    }
-
-    async fn completion(&self, params: CompletionParams) -> Result<Option<CompletionResponse>> {
-        let _ = params;
-        Ok(Some(
-            vec![
-                CompletionItem::new_simple("hello".to_string(), "what should I say".to_string()),
-                CompletionItem::new_simple("world".to_string(), "...".to_string()),
-            ]
-            .into(),
-        ))
     }
 
     async fn hover(&self, params: HoverParams) -> Result<Option<Hover>> {
