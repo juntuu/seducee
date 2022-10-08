@@ -1047,6 +1047,17 @@ impl Backend {
             .await;
         self.programs.insert(uri.to_string(), prog);
     }
+
+    fn labels(&self, cmd: &[Cmd], label: &str) -> Vec<Range> {
+        cmd.iter()
+            .filter_map(|c| match &c.c {
+                Command::Label(l) | Command::Branch(l) | Command::Test(l) if l == label => {
+                    Some(c.range)
+                }
+                _ => None,
+            })
+            .collect()
+    }
 }
 
 #[tower_lsp::async_trait]
@@ -1183,8 +1194,30 @@ impl LanguageServer for Backend {
     ///
     /// [`textDocument/references`]: https://microsoft.github.io/language-server-protocol/specification#textDocument_references
     async fn references(&self, params: ReferenceParams) -> Result<Option<Vec<Location>>> {
-        let _ = params;
-        Err(self.verbose_error("references").await)
+        let params = params.text_document_position;
+        let uri = params.text_document.uri;
+        let prog = self
+            .programs
+            .get(uri.as_str())
+            .ok_or_else(|| Error::invalid_params("document not found"))?;
+
+        let pos = params.position;
+        if let Some(c) = find_at(&prog.commands, &pos) {
+            let res = match &c.c {
+                Command::Label(label) | Command::Branch(label) | Command::Test(label) => Some(
+                    self.labels(&prog.commands, label)
+                        .into_iter()
+                        .map(|range| Location {
+                            uri: uri.clone(),
+                            range,
+                        })
+                        .collect(),
+                ),
+                _ => None,
+            };
+            return Ok(res);
+        }
+        Ok(None)
     }
 
     async fn document_highlight(
@@ -1200,10 +1233,15 @@ impl LanguageServer for Backend {
         let pos = params.position;
         if let Some(c) = find_at(&prog.commands, &pos) {
             let range = c.range;
-            self.client
-                .show_message(MessageType::WARNING, format!("got range: {:?}", range))
-                .await;
-            return Ok(Some(vec![DocumentHighlight { range, kind: None }]));
+            let hl = match &c.c {
+                Command::Label(label) | Command::Branch(label) | Command::Test(label) => self
+                    .labels(&prog.commands, label)
+                    .into_iter()
+                    .map(|range| DocumentHighlight { range, kind: None })
+                    .collect(),
+                _ => vec![DocumentHighlight { range, kind: None }],
+            };
+            return Ok(Some(hl));
         }
         Ok(None)
     }
