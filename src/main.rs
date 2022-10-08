@@ -1058,6 +1058,19 @@ impl Backend {
             })
             .collect()
     }
+
+    fn definition(&self, cmd: &[Cmd], label: &str) -> Option<Range> {
+        let mut it = cmd.iter().filter_map(|c| match &c.c {
+            Command::Label(l) if l == label => Some(c.range),
+            _ => None,
+        });
+        let res = it.next();
+        if it.next().is_some() {
+            None
+        } else {
+            res
+        }
+    }
 }
 
 #[tower_lsp::async_trait]
@@ -1185,8 +1198,24 @@ impl LanguageServer for Backend {
         &self,
         params: GotoDefinitionParams,
     ) -> Result<Option<GotoDefinitionResponse>> {
-        let _ = params;
-        Err(self.verbose_error("goto_definition").await)
+        let params = params.text_document_position_params;
+        let uri = params.text_document.uri;
+        let prog = self
+            .programs
+            .get(uri.as_str())
+            .ok_or_else(|| Error::invalid_params("document not found"))?;
+
+        let pos = params.position;
+        if let Some(c) = find_at(&prog.commands, &pos) {
+            let res = match &c.c {
+                Command::Branch(label) | Command::Test(label) => self
+                    .definition(&prog.commands, label)
+                    .map(|range| GotoDefinitionResponse::Scalar(Location { uri, range })),
+                _ => None,
+            };
+            return Ok(res);
+        }
+        Ok(None)
     }
 
     /// The [`textDocument/references`] request is sent from the client to the server to resolve
