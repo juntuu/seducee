@@ -1,3 +1,4 @@
+use std::collections::HashMap;
 use std::fmt::Display;
 
 use dashmap::DashMap;
@@ -1048,12 +1049,12 @@ impl Backend {
         self.programs.insert(uri.to_string(), prog);
     }
 
-    fn labels(&self, cmd: &[Cmd], label: &str) -> Vec<Range> {
+    fn labels(&self, cmd: &[Cmd], label: &str) -> Vec<(Range, &str)> {
         cmd.iter()
             .filter_map(|c| match &c.c {
-                Command::Label(l) | Command::Branch(l) | Command::Test(l) if l == label => {
-                    Some(c.range)
-                }
+                Command::Label(l) if l == label => Some((c.range, ":")),
+                Command::Branch(l) if l == label => Some((c.range, "b ")),
+                Command::Test(l) if l == label => Some((c.range, "t ")),
                 _ => None,
             })
             .collect()
@@ -1236,7 +1237,7 @@ impl LanguageServer for Backend {
                 Command::Label(label) | Command::Branch(label) | Command::Test(label) => Some(
                     self.labels(&prog.commands, label)
                         .into_iter()
-                        .map(|range| Location {
+                        .map(|(range, _)| Location {
                             uri: uri.clone(),
                             range,
                         })
@@ -1266,7 +1267,7 @@ impl LanguageServer for Backend {
                 Command::Label(label) | Command::Branch(label) | Command::Test(label) => self
                     .labels(&prog.commands, label)
                     .into_iter()
-                    .map(|range| DocumentHighlight { range, kind: None })
+                    .map(|(range, _)| DocumentHighlight { range, kind: None })
                     .collect(),
                 _ => vec![DocumentHighlight { range, kind: None }],
             };
@@ -1315,24 +1316,42 @@ impl LanguageServer for Backend {
     ///
     /// [`textDocument/rename`]: https://microsoft.github.io/language-server-protocol/specification#textDocument_rename
     async fn rename(&self, params: RenameParams) -> Result<Option<WorkspaceEdit>> {
-        let _ = params;
-        Err(self.verbose_error("rename").await)
-    }
+        let new_name = params.new_name;
+        let params = params.text_document_position;
+        let uri = params.text_document.uri;
+        let prog = self
+            .programs
+            .get(uri.as_str())
+            .ok_or_else(|| Error::invalid_params("document not found"))?;
 
-    /// The [`textDocument/prepareRename`] request is sent from the client to the server to setup
-    /// and test the validity of a rename operation at a given location.
-    ///
-    /// [`textDocument/prepareRename`]: https://microsoft.github.io/language-server-protocol/specification#textDocument_prepareRename
-    ///
-    /// # Compatibility
-    ///
-    /// This request was introduced in specification version 3.12.0.
-    async fn prepare_rename(
-        &self,
-        params: TextDocumentPositionParams,
-    ) -> Result<Option<PrepareRenameResponse>> {
-        let _ = params;
-        Err(self.verbose_error("prepare_rename").await)
+        if self.definition(&prog.commands, &new_name).is_some() {
+            return Err(Error::invalid_params(format!(
+                "The label `{new_name}` is already defined."
+            )));
+        }
+
+        let pos = params.position;
+        if let Some(c) = find_at(&prog.commands, &pos) {
+            let res = match &c.c {
+                Command::Label(label) | Command::Branch(label) | Command::Test(label) => self
+                    .labels(&prog.commands, label)
+                    .into_iter()
+                    .map(|(range, tag)| TextEdit {
+                        range,
+                        new_text: format!("{tag}{new_name}"),
+                    })
+                    .collect(),
+                _ => return Err(Error::invalid_params("Can only rename labels.")),
+            };
+            let mut map = HashMap::new();
+            map.insert(uri, res);
+            return Ok(Some(WorkspaceEdit {
+                changes: Some(map),
+                document_changes: None,
+                change_annotations: None,
+            }));
+        }
+        Err(Error::invalid_params("Can only rename labels."))
     }
 
     /// The [`textDocument/semanticTokens/full`] request is sent from the client to the server to
