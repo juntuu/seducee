@@ -206,10 +206,8 @@ impl Cmd {
 
     fn hover(&self) -> Option<String> {
         match &self.c {
-            Command::Block(_) => None,
             Command::Insert(_) => Some("Insert text to standard output.".to_string()),
             Command::Append(_) => Some("Append text to standard output.".to_string()),
-            Command::Change(_) => None,
             Command::TwoAddrSimple(c) => match c {
                 'd' => Some("Delete the pattern space and start the next cycle.".to_string()),
                 'D' => Some("Delete the pattern space until the first newline and start the next cycle.".to_string()),
@@ -227,7 +225,7 @@ impl Cmd {
             },
             Command::Quit => Some("Quit.".to_string()),
             Command::CurLine => Some("Print the current line number.".to_string()),
-            Command::Label(label) => Some(format!("Defines a label `{label}`.")),
+            Command::Label(label) => Some(format!("Defines the label `{label}`.")),
             Command::Branch(label) => {
                 if label.is_empty() {
                     Some(format!("Jump to the end of the script."))
@@ -246,14 +244,6 @@ impl Cmd {
                 "Copy the content of file `{f}` to standard output."
             )),
             Command::Write(f) => Some(format!("Append (write) the pattern space to file `{f}`.")),
-            Command::Sub {
-                re,
-                delim,
-                subs,
-                flags,
-                file,
-            } => None,
-            Command::Replace { delim, from, to } => None,
             Command::Silent(_) => Some(
                 concat!(
                     "Suppress default output.\n",
@@ -261,7 +251,7 @@ impl Cmd {
                 )
                 .to_string(),
             ),
-            Command::Comment(_) => None,
+            _ => None,
         }
     }
 }
@@ -288,12 +278,6 @@ fn find_at(cmd: &[Cmd], pos: &Position) -> Option<Cmd> {
 }
 
 #[derive(Debug, Clone)]
-struct Diagnostic {
-    range: Range,
-    message: String,
-}
-
-#[derive(Debug, Clone)]
 struct Parser<'a> {
     src: &'a str,
     line: u32,
@@ -310,6 +294,64 @@ impl<'a> Parser<'a> {
             col: 0,
             commands: vec![],
             diagnostics: vec![],
+        }
+    }
+
+    fn diagnostic(&mut self, severity: DiagnosticSeverity, range: Range, message: String) {
+        self.diagnostics.push(Diagnostic {
+            range,
+            message,
+            severity: Some(severity),
+            code: None,
+            code_description: None,
+            source: Some("seducee".to_string()),
+            related_information: None,
+            tags: None,
+            data: None,
+        });
+    }
+
+    fn warning(&mut self, range: Range, message: String) {
+        self.diagnostic(DiagnosticSeverity::WARNING, range, message);
+    }
+
+    fn error(&mut self, range: Range, message: String) {
+        self.diagnostic(DiagnosticSeverity::ERROR, range, message);
+    }
+
+    fn check_label_def(&mut self, label: &str, end: Position) {
+        if label.is_empty() {
+            let mut start = end;
+            start.character -= 1;
+            self.error(Range { start, end }, "Empty label.".to_string());
+        }
+        self.check_branch_label(label, end);
+        if label.starts_with(|c: char| c.is_whitespace()) {
+            let x = label.trim_start();
+            let mut start = end;
+            start.character -= label.len() as u32;
+            let mut end = end;
+            end.character -= x.len() as u32;
+            self.warning(
+                Range { start, end },
+                "Label starts with whitespace.".to_string(),
+            );
+        }
+    }
+
+    fn check_branch_label(&mut self, label: &str, end: Position) {
+        if label.len() > 8 {
+            let mut start = end;
+            start.character -= (label.len() - 8) as u32;
+            self.warning(
+                Range { start, end },
+                "Label longer than 8 bytes.".to_string(),
+            );
+        } else if label.ends_with(|c: char| c.is_whitespace()) {
+            let x = label.trim_end();
+            let mut start = end;
+            start.character -= (label.len() - x.len()) as u32;
+            self.warning(Range { start, end }, "Whitespace after label.".to_string());
         }
     }
 
@@ -420,7 +462,7 @@ impl<'a> Parser<'a> {
                 break;
             }
             n = 10 * n + (c as u8 - b'0') as usize;
-            self.src = &self.src[1..];
+            self.expect(c);
         }
         n
     }
@@ -432,11 +474,11 @@ impl<'a> Parser<'a> {
     fn addr(&mut self) -> Option<Addr> {
         match self.src.chars().next() {
             Some('$') => {
-                self.src = &self.src[1..];
+                self.expect('$');
                 Some(Addr::Last)
             }
             Some('\\') => {
-                self.src = &self.src[1..];
+                self.expect('\\');
                 self.src.chars().next().map(|c| self.re_addr(c))
             }
             Some('/') => Some(self.re_addr('/')),
@@ -644,11 +686,24 @@ impl<'a> Parser<'a> {
 
             ':' => {
                 self.expect(':');
+                let mut valid = true;
+                if !valid_address(&addr, 0) {
+                    valid = false;
+                    let mut end = start;
+                    end.character = self.col - 1;
+                    let mut start = start;
+                    start.character = 0;
+                    self.error(
+                        Range { start, end },
+                        "Label definition takes no address.".to_string(),
+                    );
+                }
                 let mut end = start;
                 end.character = self.col;
                 let label = self.rest_of_line().to_string();
                 end.character += label.len() as u32;
-                let valid = !label.is_empty() && valid_address(&addr, 0);
+                valid = valid && !label.is_empty();
+                self.check_label_def(&label, end);
                 Some(Cmd {
                     a: addr,
                     neg,
@@ -660,12 +715,13 @@ impl<'a> Parser<'a> {
 
             'b' => {
                 self.expect('b');
-                let valid = self.expect(' ');
+                self.expect(' ');
+                let valid = valid_address(&addr, 2);
                 let mut end = start;
                 end.character = self.col;
                 let label = self.rest_of_line().to_string();
                 end.character += label.len() as u32;
-                let valid = valid && !label.is_empty() && valid_address(&addr, 2);
+                self.check_branch_label(&label, end);
                 Some(Cmd {
                     a: addr,
                     neg,
@@ -677,12 +733,13 @@ impl<'a> Parser<'a> {
 
             't' => {
                 self.expect('t');
-                let valid = self.expect(' ');
+                self.expect(' ');
+                let valid = valid_address(&addr, 2);
                 let mut end = start;
                 end.character = self.col;
                 let label = self.rest_of_line().to_string();
                 end.character += label.len() as u32;
-                let valid = valid && !label.is_empty() && valid_address(&addr, 2);
+                self.check_branch_label(&label, end);
                 Some(Cmd {
                     a: addr,
                     neg,
@@ -1031,22 +1088,16 @@ impl Backend {
         }
     }
 
-    async fn verbose_error(&self, message: &str) -> Error {
-        self.client.show_message(MessageType::ERROR, message).await;
-        Error::method_not_found()
-    }
-
-    async fn changed_document(&self, uri: &str, text: &str) {
-        // TODO: emit diagnostics from parsing
+    async fn changed_document(&self, uri: Url, text: &str) {
         let mut p = Parser::new(text);
         p.program();
         let prog = Program {
             commands: p.commands,
         };
-        self.client
-            .show_message(MessageType::INFO, format!("{:?}", prog))
-            .await;
         self.programs.insert(uri.to_string(), prog);
+        self.client
+            .publish_diagnostics(uri, p.diagnostics, None)
+            .await;
     }
 
     fn labels(&self, cmd: &[Cmd], label: &str) -> Vec<(Range, &str)> {
@@ -1122,13 +1173,13 @@ impl LanguageServer for Backend {
     }
 
     async fn did_open(&self, params: DidOpenTextDocumentParams) {
-        let uri = params.text_document.uri.as_str();
+        let uri = params.text_document.uri;
         let text = &params.text_document.text;
         self.changed_document(uri, text).await;
     }
 
     async fn did_change(&self, params: DidChangeTextDocumentParams) {
-        let uri = params.text_document.uri.as_str();
+        let uri = params.text_document.uri;
         let text = &params.content_changes[0].text;
         self.changed_document(uri, text).await;
     }
@@ -1138,14 +1189,6 @@ impl LanguageServer for Backend {
         self.programs.remove(uri);
     }
 
-    /// The [`textDocument/completion`] request is sent from the client to the server to compute
-    /// completion items at a given cursor position.
-    ///
-    /// If computing full completion items is expensive, servers can additionally provide a handler
-    /// for the completion item resolve request (`completionItem/resolve`). This request is sent
-    /// when a completion item is selected in the user interface.
-    ///
-    /// [`textDocument/completion`]: https://microsoft.github.io/language-server-protocol/specification#textDocument_completion
     async fn completion(&self, params: CompletionParams) -> Result<Option<CompletionResponse>> {
         let _ = params;
         Ok(Some(
@@ -1157,13 +1200,6 @@ impl LanguageServer for Backend {
         ))
     }
 
-    /// The [`textDocument/hover`] request asks the server for hover information at a given text
-    /// document position.
-    ///
-    /// Such hover information typically includes type signature information and inline
-    /// documentation for the symbol at the given text document position.
-    ///
-    /// [`textDocument/hover`]: https://microsoft.github.io/language-server-protocol/specification#textDocument_hover
     async fn hover(&self, params: HoverParams) -> Result<Option<Hover>> {
         let params = params.text_document_position_params;
         let prog = self
@@ -1180,21 +1216,6 @@ impl LanguageServer for Backend {
         Ok(None)
     }
 
-    /// The [`textDocument/definition`] request asks the server for the definition location of a
-    /// symbol at a given text document position.
-    ///
-    /// [`textDocument/definition`]: https://microsoft.github.io/language-server-protocol/specification#textDocument_definition
-    ///
-    /// # Compatibility
-    ///
-    /// The [`GotoDefinitionResponse::Link`](lsp_types::GotoDefinitionResponse::Link) return value
-    /// was introduced in specification version 3.14.0 and requires client-side support in order to
-    /// be used. It can be returned if the client set the following field to `true` in the
-    /// [`initialize`](LanguageServer::initialize) method:
-    ///
-    /// ```text
-    /// InitializeParams::capabilities::text_document::definition::link_support
-    /// ```
     async fn goto_definition(
         &self,
         params: GotoDefinitionParams,
@@ -1219,10 +1240,6 @@ impl LanguageServer for Backend {
         Ok(None)
     }
 
-    /// The [`textDocument/references`] request is sent from the client to the server to resolve
-    /// project-wide references for the symbol denoted by the given text document position.
-    ///
-    /// [`textDocument/references`]: https://microsoft.github.io/language-server-protocol/specification#textDocument_references
     async fn references(&self, params: ReferenceParams) -> Result<Option<Vec<Location>>> {
         let params = params.text_document_position;
         let uri = params.text_document.uri;
@@ -1276,10 +1293,6 @@ impl LanguageServer for Backend {
         Ok(None)
     }
 
-    /// The [`textDocument/formatting`] request is sent from the client to the server to format a
-    /// whole document.
-    ///
-    /// [`textDocument/formatting`]: https://microsoft.github.io/language-server-protocol/specification#textDocument_formatting
     async fn formatting(&self, params: DocumentFormattingParams) -> Result<Option<Vec<TextEdit>>> {
         if params.options.insert_spaces {
             return Err(Error::invalid_params("must prefer tabs"));
@@ -1302,19 +1315,9 @@ impl LanguageServer for Backend {
         range.end.line += 1000;
         range.end.character = 0;
         let new_text = prog.format();
-
-        self.client
-            .show_message(MessageType::WARNING, format!("{:?}\n{:?}", range, new_text))
-            .await;
-
         Ok(Some(vec![TextEdit { range, new_text }]))
     }
 
-    /// The [`textDocument/rename`] request is sent from the client to the server to ask the server
-    /// to compute a workspace change so that the client can perform a workspace-wide rename of a
-    /// symbol.
-    ///
-    /// [`textDocument/rename`]: https://microsoft.github.io/language-server-protocol/specification#textDocument_rename
     async fn rename(&self, params: RenameParams) -> Result<Option<WorkspaceEdit>> {
         let new_name = params.new_name;
         let params = params.text_document_position;
@@ -1352,28 +1355,6 @@ impl LanguageServer for Backend {
             }));
         }
         Err(Error::invalid_params("Can only rename labels."))
-    }
-
-    /// The [`textDocument/semanticTokens/full`] request is sent from the client to the server to
-    /// resolve the semantic tokens of a given file.
-    ///
-    /// Semantic tokens are used to add additional color information to a file that depends on
-    /// language specific symbol information. A semantic token request usually produces a large
-    /// result. The protocol therefore supports encoding tokens with numbers. In addition, optional
-    /// support for deltas is available, i.e. [`semantic_tokens_full_delta`].
-    ///
-    /// [`textDocument/semanticTokens/full`]: https://microsoft.github.io/language-server-protocol/specification#textDocument_semanticTokens
-    /// [`semantic_tokens_full_delta`]: LanguageServer::semantic_tokens_full_delta
-    ///
-    /// # Compatibility
-    ///
-    /// This request was introduced in specification version 3.16.0.
-    async fn semantic_tokens_full(
-        &self,
-        params: SemanticTokensParams,
-    ) -> Result<Option<SemanticTokensResult>> {
-        let _ = params;
-        Err(self.verbose_error("semantic_tokens_full").await)
     }
 }
 
