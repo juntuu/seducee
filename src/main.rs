@@ -202,6 +202,67 @@ impl Cmd {
         }
         s
     }
+
+    fn hover(&self) -> Option<String> {
+        match &self.c {
+            Command::Block(_) => None,
+            Command::Insert(_) => Some("Insert text to standard output.".to_string()),
+            Command::Append(_) => Some("Append text to standard output.".to_string()),
+            Command::Change(_) => None,
+            Command::TwoAddrSimple(c) => match c {
+                'd' => Some("Delete the pattern space and start the next cycle.".to_string()),
+                'D' => Some("Delete the pattern space until the first newline and start the next cycle.".to_string()),
+                'g' => Some("Replace the contents of the pattern space by the contents of the hold space.".to_string()),
+                'G' => Some("Append to the pattern space a newline followed by the contents of the hold space.".to_string()),
+                'h' => Some("Replace the contents of the hold space with the contents of the pattern space.".to_string()),
+                'H' => Some("Append to the hold space a newline followed by the contents of the pattern space.".to_string()),
+                'l' => Some("Write the pattern space to standard output in a visually unambiguous form.".to_string()),
+                'n' => Some("Do default output, and read next line.".to_string()),
+                'N' => Some("Append the next input line to pattern space, with a newline added between.".to_string()),
+                'p' => Some("Write the pattern space to standard output.".to_string()),
+                'P' => Some("Write the pattern space, up to the first newline, to standard output.".to_string()),
+                'x' => Some("Exchange the contents of the pattern and hold spaces.".to_string()),
+                _ => None,
+            },
+            Command::Quit => Some("Quit.".to_string()),
+            Command::CurLine => Some("Print the current line number.".to_string()),
+            Command::Label(label) => Some(format!("Defines a label `{label}`.")),
+            Command::Branch(label) => {
+                if label.is_empty() {
+                    Some(format!("Jump to the end of the script."))
+                } else {
+                    Some(format!("Jump to the label `{label}`."))
+                }
+            }
+            Command::Test(label) => {
+                if label.is_empty() {
+                    Some(format!("Jump to the end of the script if any substitution have been made since the most recent reading of an input line or execution of a t."))
+                } else {
+                    Some(format!("Jump to the label `{label}` if any substitution have been made since the most recent reading of an input line or execution of a t."))
+                }
+            }
+            Command::Read(f) => Some(format!(
+                "Copy the content of file `{f}` to standard output."
+            )),
+            Command::Write(f) => Some(format!("Append (write) the pattern space to file `{f}`.")),
+            Command::Sub {
+                re,
+                delim,
+                subs,
+                flags,
+                file,
+            } => None,
+            Command::Replace { delim, from, to } => None,
+            Command::Silent(_) => Some(
+                concat!(
+                    "Suppress default output.\n",
+                    "Equivalent to specifying `-n` on the command line."
+                )
+                .to_string(),
+            ),
+            Command::Comment(_) => None,
+        }
+    }
 }
 
 #[derive(Debug, Clone)]
@@ -1079,15 +1140,19 @@ impl LanguageServer for Backend {
     ///
     /// [`textDocument/hover`]: https://microsoft.github.io/language-server-protocol/specification#textDocument_hover
     async fn hover(&self, params: HoverParams) -> Result<Option<Hover>> {
-        let _ = params;
-        let pos = params.text_document_position_params.position;
-        Ok(Some(Hover {
-            contents: HoverContents::Scalar(MarkedString::String("todo".to_string())),
-            range: Some(Range {
-                start: pos,
-                end: pos,
-            }),
-        }))
+        let params = params.text_document_position_params;
+        let prog = self
+            .programs
+            .get(params.text_document.uri.as_str())
+            .ok_or_else(|| Error::invalid_params("document not found"))?;
+        let pos = params.position;
+        if let Some(c) = find_at(&prog.commands, &pos) {
+            return Ok(c.hover().map(|text| Hover {
+                contents: HoverContents::Scalar(MarkedString::String(text)),
+                range: Some(c.range),
+            }));
+        }
+        Ok(None)
     }
 
     /// The [`textDocument/definition`] request asks the server for the definition location of a
