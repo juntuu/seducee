@@ -1102,11 +1102,12 @@ impl Backend {
 
     fn labels(&self, cmd: &[Cmd], label: &str) -> Vec<(Range, &str)> {
         cmd.iter()
-            .filter_map(|c| match &c.c {
-                Command::Label(l) if l == label => Some((c.range, ":")),
-                Command::Branch(l) if l == label => Some((c.range, "b ")),
-                Command::Test(l) if l == label => Some((c.range, "t ")),
-                _ => None,
+            .flat_map(|c| match &c.c {
+                Command::Block(cs) => self.labels(cs, label),
+                Command::Label(l) if l == label => vec![(c.range, ":")],
+                Command::Branch(l) if l == label => vec![(c.range, "b ")],
+                Command::Test(l) if l == label => vec![(c.range, "t ")],
+                _ => vec![],
             })
             .collect()
     }
