@@ -352,6 +352,12 @@ impl<'a> Parser<'a> {
             let mut start = end;
             start.character -= (label.len() - x.len()) as u32;
             self.warning(Range { start, end }, "Whitespace after label.".to_string());
+        } else if let Some(i) = label.find(';') {
+            let mut start = end;
+            start.character -= (label.len() - i) as u32;
+            let mut end = start;
+            end.character += 1;
+            self.warning(Range { start, end }, "Label contains a `;`.".to_string());
         }
     }
 
