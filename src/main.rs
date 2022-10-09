@@ -1096,6 +1096,11 @@ impl Program {
 
             last = c.range.end.line;
         }
+        if let Some(c) = self.commands.first() {
+            if matches!(c.c, Command::Comment(_)) && s.starts_with("#n") {
+                s.insert(0, ';');
+            }
+        }
         s
     }
 }
@@ -1311,6 +1316,8 @@ impl LanguageServer for Backend {
         }
 
         let mut range = prog.range();
+        range.start.line = 0;
+        range.start.character = 0;
         // NOTE: this will not trim unlimited number of trailing empty lines
         range.end.line += 1000;
         range.end.character = 0;
