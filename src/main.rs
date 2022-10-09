@@ -567,12 +567,7 @@ impl<'a> Parser<'a> {
         let addr = self.two_addr();
         self.opt_space();
 
-        let neg = if self.src.starts_with('!') {
-            self.src = &self.src[1..];
-            true
-        } else {
-            false
-        };
+        let neg = self.expect('!');
 
         match self.src.chars().next().unwrap() {
             'i' => {
@@ -1034,10 +1029,13 @@ impl<'a> Parser<'a> {
     fn until(&mut self, delim: char) -> Option<String> {
         let mut prev = 'x';
         for (i, c) in self.src.char_indices() {
+            self.col += 1;
+            if c == '\n' {
+                self.line += 1;
+                self.col = 0;
+                return None;
+            }
             if prev != '\\' {
-                if c == '\n' {
-                    return None;
-                }
                 if c == delim {
                     let s = self.src[..i].to_string();
                     self.src = &self.src[i + 1..];
