@@ -1,4 +1,4 @@
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::fmt::Display;
 
 use dashmap::DashMap;
@@ -284,6 +284,8 @@ struct Parser<'a> {
     col: u32,
     commands: Vec<Cmd>,
     diagnostics: Vec<Diagnostic>,
+    label_defs: HashSet<String>,
+    label_use: Vec<(String, Range)>,
 }
 
 impl<'a> Parser<'a> {
@@ -294,6 +296,8 @@ impl<'a> Parser<'a> {
             col: 0,
             commands: vec![],
             diagnostics: vec![],
+            label_defs: HashSet::new(),
+            label_use: vec![],
         }
     }
 
@@ -324,7 +328,15 @@ impl<'a> Parser<'a> {
             let mut start = end;
             start.character -= 1;
             self.error(Range { start, end }, "Empty label.".to_string());
+            return;
         }
+
+        if !self.label_defs.insert(label.to_string()) {
+            let mut start = end;
+            start.character -= label.len() as u32;
+            self.error(Range { start, end }, format!("Duplicate label `{label}`."));
+        }
+
         self.check_branch_label(label, end);
         if label.starts_with(|c: char| c.is_whitespace()) {
             let x = label.trim_start();
@@ -730,6 +742,7 @@ impl<'a> Parser<'a> {
                 let label = self.rest_of_line().to_string();
                 end.character += label.len() as u32;
                 self.check_branch_label(&label, end);
+                self.label_use.push((label.clone(), Range { start, end }));
                 Some(Cmd {
                     a: addr,
                     neg,
@@ -748,6 +761,7 @@ impl<'a> Parser<'a> {
                 let label = self.rest_of_line().to_string();
                 end.character += label.len() as u32;
                 self.check_branch_label(&label, end);
+                self.label_use.push((label.clone(), Range { start, end }));
                 Some(Cmd {
                     a: addr,
                     neg,
@@ -944,6 +958,12 @@ impl<'a> Parser<'a> {
 
         while let Some(c) = self.command() {
             self.commands.push(c);
+        }
+
+        for (label, range) in self.label_use.clone() {
+            if !label.is_empty() && !self.label_defs.contains(&label) {
+                self.error(range, format!("Undefined label `{label}`"));
+            }
         }
 
         // NOTE: any left overs from parsing is stored as a single invalid comment
