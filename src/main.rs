@@ -347,12 +347,14 @@ impl<'a> Parser<'a> {
                 Range { start, end },
                 "Label longer than 8 bytes.".to_string(),
             );
-        } else if label.ends_with(|c: char| c.is_whitespace()) {
+        }
+        if label.ends_with(|c: char| c.is_whitespace()) {
             let x = label.trim_end();
             let mut start = end;
             start.character -= (label.len() - x.len()) as u32;
             self.warning(Range { start, end }, "Whitespace after label.".to_string());
-        } else if let Some(i) = label.find(';') {
+        }
+        if let Some(i) = label.find(';') {
             let mut start = end;
             start.character -= (label.len() - i) as u32;
             let mut end = start;
