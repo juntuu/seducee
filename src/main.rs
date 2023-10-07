@@ -1098,6 +1098,12 @@ impl<'a> Parser<'a> {
         let mut valid = true;
         let mut file = None;
         let mut flags = vec![];
+
+        let start = Position {
+            line: self.line,
+            character: self.col,
+        };
+
         while let Some(flag) = self.flag() {
             let write = flag.as_str() == "w";
             flags.push(flag);
@@ -1110,6 +1116,23 @@ impl<'a> Parser<'a> {
                 file = Some(name);
                 break;
             }
+        }
+
+        let g_and_numbers = flags
+            .iter()
+            .filter(|&f| *f == "g" || f.chars().all(|c| c.is_ascii_digit()))
+            .count();
+        if g_and_numbers > 1 {
+            self.error(
+                Range {
+                    start,
+                    end: Position {
+                        line: self.line,
+                        character: self.col,
+                    },
+                },
+                "More than one `g` or number flag.".to_string(),
+            );
         }
 
         (valid, flags, file)
