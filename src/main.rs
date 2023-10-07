@@ -1170,6 +1170,7 @@ impl Backend {
     fn definition(&self, cmd: &[Cmd], label: &str) -> Option<Range> {
         let mut it = cmd.iter().filter_map(|c| match &c.c {
             Command::Label(l) if l == label => Some(c.range),
+            Command::Block(cs) => self.definition(cs, label),
             _ => None,
         });
         let res = it.next();
