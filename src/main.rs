@@ -264,17 +264,37 @@ impl Cmd {
                     Some(format!("Jump to the label `{label}` if any substitution have been made since the most recent reading of an input line or execution of a t."))
                 }
             }
-            Command::Read(f) => Some(format!(
-                "Copy the content of file `{f}` to standard output."
-            )),
+            Command::Read(f) => Some(format!("Copy the content of file `{f}` to standard output.")),
             Command::Write(f) => Some(format!("Append (write) the pattern space to file `{f}`.")),
-            Command::Silent(_) => Some(
-                concat!(
-                    "Suppress default output.\n",
-                    "Equivalent to specifying `-n` on the command line."
-                )
-                .to_string(),
-            ),
+            Command::Silent(_) => Some(concat!("Suppress default output.\n", "Equivalent to specifying `-n` on the command line.").to_string()),
+            Command::Sub { re, delim: _, subs, flags, file: _ } => {
+                let how_many = if flags.iter().any(|f| f == "g") {
+                    "all non-overlapping instances of".to_string()
+                } else {
+                    flags.iter().find(|f| f.chars().all(|c| c.is_ascii_digit())).map(|num| {
+                        let suffix = match num.as_str() {
+                            "1" => "st",
+                            "2" => "nd",
+                            "3" => "rd",
+                            _ => "th",
+                        };
+                        format!("the {num}{suffix} occurence of")
+                    }).unwrap_or_else(|| "first instance of".to_string())
+                };
+                let subs = if subs.is_empty() {
+                    "the empty string".to_string()
+                } else {
+                    format!("`{subs}`")
+                };
+                let re = if re.is_empty() {
+                    "the empty regex".to_string()
+                } else {
+                    format!("regular expression `{re}`")
+                };
+                Some(format!("Substitute {subs} for {how_many} {re} in the pattern space."))
+            }
+            Command::Replace { delim: _, from, to } =>
+                Some(format!("Replace all characters from `{from}` with corresponding character in `{to}`.")),
             _ => None,
         }
     }
