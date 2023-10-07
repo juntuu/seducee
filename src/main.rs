@@ -933,13 +933,111 @@ impl<'a> Parser<'a> {
                 }
 
                 self.expect(delim);
+                let from_start = Position {
+                    line: self.line,
+                    character: self.col,
+                };
                 if let Some(from) = self.until(delim) {
+                    let to_start = Position {
+                        line: self.line,
+                        character: self.col,
+                    };
                     if let Some(to) = self.until(delim) {
-                        let valid = self.check_repl(delim, &from, &to);
                         let end = Position {
                             line: self.line,
                             character: self.col,
                         };
+                        let mut valid = true;
+                        let mut esc = false;
+                        let mut from_chars = vec![];
+                        for (i, mut c) in from.chars().enumerate() {
+                            if esc {
+                                if c != delim && c != 'n' && c != '\\' {
+                                    valid = false;
+                                    self.warning(
+                                        Range {
+                                            start: Position {
+                                                line: from_start.line,
+                                                character: from_start.character + i as u32,
+                                            },
+                                            end: Position {
+                                                line: from_start.line,
+                                                character: from_start.character + i as u32 + 1,
+                                            },
+                                        },
+                                        format!("unknown escape `{c}`, the backslash is treated literally"),
+                                    );
+                                    from_chars.push('\\');
+                                }
+                                esc = false;
+                                if c == 'n' {
+                                    c = '\n'
+                                }
+                            } else if c == '\\' {
+                                esc = true;
+                                continue;
+                            }
+                            if from_chars.contains(&c) {
+                                valid = false;
+                                self.warning(
+                                    Range {
+                                        start: Position {
+                                            line: from_start.line,
+                                            character: from_start.character + i as u32,
+                                        },
+                                        end: Position {
+                                            line: from_start.line,
+                                            character: from_start.character + i as u32 + 1,
+                                        },
+                                    },
+                                    if c == '\n' {
+                                        format!("duplicate character `\\n`")
+                                    } else {
+                                        format!("duplicate character `{c}`")
+                                    },
+                                );
+                            }
+                            from_chars.push(c);
+                        }
+
+                        let mut n = 0;
+                        for (i, c) in to.chars().enumerate() {
+                            if esc {
+                                if c != delim && c != 'n' && c != '\\' {
+                                    valid = false;
+                                    self.warning(
+                                        Range {
+                                            start: Position {
+                                                line: to_start.line,
+                                                character: to_start.character + i as u32,
+                                            },
+                                            end: Position {
+                                                line: to_start.line,
+                                                character: to_start.character + i as u32 + 1,
+                                            },
+                                        },
+                                        format!("unknown escape `{c}`, the backslash is treated literally"),
+                                    );
+                                    n += 1;
+                                }
+                                esc = false;
+                                n += 1;
+                            } else if c == '\\' {
+                                esc = true;
+                            } else {
+                                n += 1;
+                            }
+                        }
+                        if n != from_chars.len() {
+                            valid = false;
+                            self.error(
+                                Range {
+                                    start: from_start,
+                                    end,
+                                },
+                                format!("Transform strings are not the same length: the first has {} characters and the second has {}.", from_chars.len(), n),
+                            );
+                        }
                         return Some(Cmd {
                             a: addr,
                             neg,
@@ -1024,50 +1122,6 @@ impl<'a> Parser<'a> {
                 valid: false,
             });
         }
-    }
-
-    fn check_repl(&self, delim: char, from: &str, to: &str) -> bool {
-        let mut esc = false;
-        let mut from_chars = vec![];
-        for c in from.chars() {
-            if esc {
-                if c != delim && c != 'n' && c != '\\' {
-                    return false;
-                }
-                esc = false;
-                let c = if c == 'n' { '\n' } else { c };
-                if from_chars.contains(&c) {
-                    return false;
-                }
-                from_chars.push(c);
-            } else if c == '\\' {
-                esc = true;
-            } else if from_chars.contains(&c) {
-                return false;
-            } else {
-                from_chars.push(c);
-            }
-        }
-
-        let mut n = 0;
-        for c in to.chars() {
-            if esc {
-                if c != delim && c != 'n' && c != '\\' {
-                    return false;
-                }
-                esc = false;
-                n += 1;
-            } else if c == '\\' {
-                esc = true;
-            } else {
-                n += 1;
-            }
-            if n > from_chars.len() {
-                return false;
-            }
-        }
-
-        true
     }
 
     fn until(&mut self, delim: char) -> Option<String> {
