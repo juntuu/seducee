@@ -112,6 +112,30 @@ fn fmt_address(addr: &Address) -> String {
     }
 }
 
+const COMMANDS: [(&str, &str); 21] = [
+    ("i", "Insert text to standard output."),
+    ("a", "Append text to standard output."),
+    ("d", "Delete the pattern space and start the next cycle."),
+    ("D", "Delete the pattern space until the first newline and start the next cycle."),
+    ("g", "Replace the contents of the pattern space by the contents of the hold space."),
+    ("G", "Append to the pattern space a newline followed by the contents of the hold space."),
+    ("h", "Replace the contents of the hold space with the contents of the pattern space."),
+    ("H", "Append to the hold space a newline followed by the contents of the pattern space."),
+    ("l", "Write the pattern space to standard output in a visually unambiguous form."),
+    ("n", "Do default output, and read next line."),
+    ("N", "Append the next input line to pattern space, with a newline added between."),
+    ("p", "Write the pattern space to standard output."),
+    ("P", "Write the pattern space, up to the first newline, to standard output."),
+    ("x", "Exchange the contents of the pattern and hold spaces."),
+    ("q", "Quit."),
+    ("=", "Print the current line number."),
+    (":", "Define a label."),
+    ("b", "Jump to a label or the end of the script."),
+    ("t", "Jump to a label or the end of the script if any substitution have been made since the most recent reading of an input line or execution of a t."),
+    ("r", "Copy the content of given file to standard output."),
+    ("w", "Append (write) the pattern space to given file."),
+];
+
 impl Cmd {
     fn format(&self, indent: usize) -> String {
         let mut s = String::new();
@@ -1163,6 +1187,7 @@ impl LanguageServer for Backend {
         Ok(InitializeResult {
             capabilities: ServerCapabilities {
                 hover_provider: Some(HoverProviderCapability::Simple(true)),
+                completion_provider: Some(CompletionOptions::default()),
                 text_document_sync: Some(TextDocumentSyncCapability::Kind(
                     TextDocumentSyncKind::FULL,
                 )),
@@ -1203,6 +1228,72 @@ impl LanguageServer for Backend {
     async fn did_close(&self, params: DidCloseTextDocumentParams) {
         let uri = params.text_document.uri.as_str();
         self.programs.remove(uri);
+    }
+
+    async fn completion(&self, params: CompletionParams) -> Result<Option<CompletionResponse>> {
+        let params = params.text_document_position;
+        let pos = params.position;
+        let prog = self
+            .programs
+            .get(params.text_document.uri.as_str())
+            .ok_or_else(|| Error::invalid_params("document not found"))?;
+
+        let is_comment = pos.character > 0
+            && matches!(
+                find_at(
+                    &prog.commands,
+                    &Position {
+                        line: pos.line,
+                        character: pos.character - 1
+                    }
+                ),
+                Some(Cmd {
+                    c: Command::Comment(_),
+                    ..
+                })
+            );
+
+        if is_comment {
+            if pos.line == 0 && pos.character == 1 {
+                return Ok(Some(CompletionResponse::Array(vec![CompletionItem {
+                    label: "#n".to_string(),
+                    insert_text: Some("n".to_string()),
+                    detail: Some(
+                        concat!(
+                            "Suppress default output.\n",
+                            "Equivalent to specifying `-n` on the command line."
+                        )
+                        .to_string(),
+                    ),
+                    ..CompletionItem::default()
+                }])));
+            }
+            return Ok(None);
+        }
+
+        let mut completions: Vec<_> = COMMANDS
+            .iter()
+            .map(|(label, doc)| CompletionItem {
+                label: label.to_string(),
+                detail: Some(doc.to_string()),
+                ..CompletionItem::default()
+            })
+            .collect();
+        if pos.line == 0 && pos.character == 0 {
+            completions.push(CompletionItem {
+                label: "#n".to_string(),
+                detail: Some(
+                    concat!(
+                        "Suppress default output.\n",
+                        "Equivalent to specifying `-n` on the command line."
+                    )
+                    .to_string(),
+                ),
+                ..CompletionItem::default()
+            })
+        }
+
+        Ok(Some(CompletionResponse::Array(completions)))
     }
 
     async fn hover(&self, params: HoverParams) -> Result<Option<Hover>> {
