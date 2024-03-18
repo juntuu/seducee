@@ -97,10 +97,10 @@ fn valid_addr(addr: &Addr) -> bool {
 }
 
 fn valid_address(addr: &Address, n: u32) -> bool {
-    match &addr {
-        &Some((one, Some(two))) => n >= 2 && valid_addr(one) && valid_addr(two),
-        &Some((one, None)) => n >= 1 && valid_addr(one),
-        &None => true,
+    match addr {
+        Some((one, Some(two))) => n >= 2 && valid_addr(one) && valid_addr(two),
+        Some((one, None)) => n >= 1 && valid_addr(one),
+        None => true,
     }
 }
 
@@ -252,14 +252,14 @@ impl Cmd {
             Command::Label(label) => Some(format!("Defines the label `{label}`.")),
             Command::Branch(label) => {
                 if label.is_empty() {
-                    Some(format!("Jump to the end of the script."))
+                    Some("Jump to the end of the script.".to_string())
                 } else {
                     Some(format!("Jump to the label `{label}`."))
                 }
             }
             Command::Test(label) => {
                 if label.is_empty() {
-                    Some(format!("Jump to the end of the script if any substitution have been made since the most recent reading of an input line or execution of a t."))
+                    Some("Jump to the end of the script if any substitution have been made since the most recent reading of an input line or execution of a t.".to_string())
                 } else {
                     Some(format!("Jump to the label `{label}` if any substitution have been made since the most recent reading of an input line or execution of a t."))
                 }
@@ -500,11 +500,11 @@ impl<'a> Parser<'a> {
         }
         let re = self.src.to_string();
         self.src = "";
-        return Addr::Ctx {
+        Addr::Ctx {
             re,
             delim,
             valid: false,
-        };
+        }
     }
 
     fn flag(&mut self) -> Option<String> {
@@ -991,7 +991,7 @@ impl<'a> Parser<'a> {
                                         },
                                     },
                                     if c == '\n' {
-                                        format!("duplicate character `\\n`")
+                                        "duplicate character `\\n`".to_string()
                                     } else {
                                         format!("duplicate character `{c}`")
                                     },
@@ -1133,12 +1133,10 @@ impl<'a> Parser<'a> {
                 self.col = 0;
                 return None;
             }
-            if prev != '\\' {
-                if c == delim {
-                    let s = self.src[..i].to_string();
-                    self.src = &self.src[i + 1..];
-                    return Some(s);
-                }
+            if prev != '\\' && c == delim {
+                let s = self.src[..i].to_string();
+                self.src = &self.src[i + 1..];
+                return Some(s);
             }
 
             prev = c;
@@ -1559,6 +1557,6 @@ async fn main() {
     let stdin = tokio::io::stdin();
     let stdout = tokio::io::stdout();
 
-    let (service, socket) = LspService::new(|client| Backend::new(client));
+    let (service, socket) = LspService::new(Backend::new);
     Server::new(stdin, stdout, socket).serve(service).await;
 }
