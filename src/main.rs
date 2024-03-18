@@ -937,117 +937,114 @@ impl<'a> Parser<'a> {
                     line: self.line,
                     character: self.col,
                 };
-                if let Some(from) = self.until(delim) {
-                    let to_start = Position {
-                        line: self.line,
-                        character: self.col,
-                    };
-                    if let Some(to) = self.until(delim) {
-                        let end = Position {
-                            line: self.line,
-                            character: self.col,
-                        };
-                        let mut valid = true;
-                        let mut esc = false;
-                        let mut from_chars = vec![];
-                        for (i, mut c) in from.chars().enumerate() {
-                            if esc {
-                                if c != delim && c != 'n' && c != '\\' {
-                                    valid = false;
-                                    self.warning(
-                                        Range {
-                                            start: Position {
-                                                line: from_start.line,
-                                                character: from_start.character + i as u32,
-                                            },
-                                            end: Position {
-                                                line: from_start.line,
-                                                character: from_start.character + i as u32 + 1,
-                                            },
-                                        },
-                                        format!("unknown escape `{c}`, the backslash is treated literally"),
-                                    );
-                                    from_chars.push('\\');
-                                }
-                                esc = false;
-                                if c == 'n' {
-                                    c = '\n'
-                                }
-                            } else if c == '\\' {
-                                esc = true;
-                                continue;
-                            }
-                            if from_chars.contains(&c) {
-                                valid = false;
-                                self.warning(
-                                    Range {
-                                        start: Position {
-                                            line: from_start.line,
-                                            character: from_start.character + i as u32,
-                                        },
-                                        end: Position {
-                                            line: from_start.line,
-                                            character: from_start.character + i as u32 + 1,
-                                        },
-                                    },
-                                    if c == '\n' {
-                                        "duplicate character `\\n`".to_string()
-                                    } else {
-                                        format!("duplicate character `{c}`")
-                                    },
-                                );
-                            }
-                            from_chars.push(c);
-                        }
-
-                        let mut n = 0;
-                        for (i, c) in to.chars().enumerate() {
-                            if esc {
-                                if c != delim && c != 'n' && c != '\\' {
-                                    valid = false;
-                                    self.warning(
-                                        Range {
-                                            start: Position {
-                                                line: to_start.line,
-                                                character: to_start.character + i as u32,
-                                            },
-                                            end: Position {
-                                                line: to_start.line,
-                                                character: to_start.character + i as u32 + 1,
-                                            },
-                                        },
-                                        format!("unknown escape `{c}`, the backslash is treated literally"),
-                                    );
-                                    n += 1;
-                                }
-                                esc = false;
-                                n += 1;
-                            } else if c == '\\' {
-                                esc = true;
-                            } else {
-                                n += 1;
-                            }
-                        }
-                        if n != from_chars.len() {
+                let from = self.until(delim)?;
+                let to_start = Position {
+                    line: self.line,
+                    character: self.col,
+                };
+                let to = self.until(delim)?;
+                let end = Position {
+                    line: self.line,
+                    character: self.col,
+                };
+                let mut valid = true;
+                let mut esc = false;
+                let mut from_chars = vec![];
+                for (i, mut c) in from.chars().enumerate() {
+                    if esc {
+                        if c != delim && c != 'n' && c != '\\' {
                             valid = false;
-                            self.error(
+                            self.warning(
+                                Range {
+                                    start: Position {
+                                        line: from_start.line,
+                                        character: from_start.character + i as u32,
+                                    },
+                                    end: Position {
+                                        line: from_start.line,
+                                        character: from_start.character + i as u32 + 1,
+                                    },
+                                },
+                                format!("unknown escape `{c}`, the backslash is treated literally"),
+                            );
+                            from_chars.push('\\');
+                        }
+                        esc = false;
+                        if c == 'n' {
+                            c = '\n'
+                        }
+                    } else if c == '\\' {
+                        esc = true;
+                        continue;
+                    }
+                    if from_chars.contains(&c) {
+                        valid = false;
+                        self.warning(
+                            Range {
+                                start: Position {
+                                    line: from_start.line,
+                                    character: from_start.character + i as u32,
+                                },
+                                end: Position {
+                                    line: from_start.line,
+                                    character: from_start.character + i as u32 + 1,
+                                },
+                            },
+                            if c == '\n' {
+                                "duplicate character `\\n`".to_string()
+                            } else {
+                                format!("duplicate character `{c}`")
+                            },
+                        );
+                    }
+                    from_chars.push(c);
+                }
+
+                let mut n = 0;
+                for (i, c) in to.chars().enumerate() {
+                    if esc {
+                        if c != delim && c != 'n' && c != '\\' {
+                            valid = false;
+                            self.warning(
+                                Range {
+                                    start: Position {
+                                        line: to_start.line,
+                                        character: to_start.character + i as u32,
+                                    },
+                                    end: Position {
+                                        line: to_start.line,
+                                        character: to_start.character + i as u32 + 1,
+                                    },
+                                },
+                                format!("unknown escape `{c}`, the backslash is treated literally"),
+                            );
+                            n += 1;
+                        }
+                        esc = false;
+                        n += 1;
+                    } else if c == '\\' {
+                        esc = true;
+                    } else {
+                        n += 1;
+                    }
+                }
+                if n != from_chars.len() {
+                    valid = false;
+                    self.error(
                                 Range {
                                     start: from_start,
                                     end,
                                 },
                                 format!("Transform strings are not the same length: the first has {} characters and the second has {}.", from_chars.len(), n),
                             );
-                        }
-                        return Some(Cmd {
-                            a: addr,
-                            neg,
-                            c: Command::Replace { delim, from, to },
-                            range: Range { start, end },
-                            valid,
-                        });
-                    }
                 }
-                None
+                Some(Cmd {
+                    a: addr,
+                    neg,
+                    c: Command::Replace { delim, from, to },
+                    range: Range { start, end },
+                    valid,
+                })
             }
 
             c if "dDgGhHlnNpPx".contains(c) => {
