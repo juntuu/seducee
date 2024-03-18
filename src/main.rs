@@ -1527,26 +1527,25 @@ impl LanguageServer for Backend {
             )));
         }
 
-        let pos = params.position;
-        if let Some(c) = find_at(&prog.commands, &pos) {
-            let res = match &c.c {
-                Command::Label(label) | Command::Branch(label) | Command::Test(label) => self
-                    .labels(&prog.commands, label)
-                    .into_iter()
-                    .map(|(range, tag)| TextEdit {
-                        range,
-                        new_text: format!("{tag}{new_name}"),
-                    })
-                    .collect(),
-                _ => return Err(Error::invalid_params("Can only rename labels.")),
-            };
-            return Ok(Some(WorkspaceEdit {
-                changes: Some(HashMap::from([(uri, res)])),
-                document_changes: None,
-                change_annotations: None,
-            }));
-        }
-        Err(Error::invalid_params("Can only rename labels."))
+        let c = find_at(&prog.commands, &params.position)
+            .ok_or_else(|| Error::invalid_params("Can only rename labels."))?;
+        let (Command::Label(label) | Command::Branch(label) | Command::Test(label)) = &c.c else {
+            return Err(Error::invalid_params("Can only rename labels."));
+        };
+
+        let res = self
+            .labels(&prog.commands, label)
+            .into_iter()
+            .map(|(range, tag)| TextEdit {
+                range,
+                new_text: format!("{tag}{new_name}"),
+            })
+            .collect();
+        Ok(Some(WorkspaceEdit {
+            changes: Some(HashMap::from([(uri, res)])),
+            document_changes: None,
+            change_annotations: None,
+        }))
     }
 }
 
