@@ -1540,10 +1540,8 @@ impl LanguageServer for Backend {
                     .collect(),
                 _ => return Err(Error::invalid_params("Can only rename labels.")),
             };
-            let mut map = HashMap::new();
-            map.insert(uri, res);
             return Ok(Some(WorkspaceEdit {
-                changes: Some(map),
+                changes: Some(HashMap::from([(uri, res)])),
                 document_changes: None,
                 change_annotations: None,
             }));
