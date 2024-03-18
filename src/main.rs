@@ -1250,22 +1250,20 @@ impl Backend {
             .await;
     }
 
-    fn labels(&self, cmd: &[Cmd], label: &str) -> Vec<(Range, &str)> {
-        cmd.iter()
-            .flat_map(|c| match &c.c {
-                Command::Block(cs) => self.labels(cs, label),
-                Command::Label(l) if l == label => vec![(c.range, ":")],
-                Command::Branch(l) if l == label => vec![(c.range, "b ")],
-                Command::Test(l) if l == label => vec![(c.range, "t ")],
-                _ => vec![],
-            })
-            .collect()
+    fn labels<'a>(cmd: &'a [Cmd], label: &'a str) -> impl Iterator<Item = (Range, &'a str)> + 'a {
+        cmd.iter().flat_map(move |c| match &c.c {
+            Command::Block(cs) => Self::labels(cs, label).collect::<Vec<_>>(),
+            Command::Label(l) if l == label => vec![(c.range, ":")],
+            Command::Branch(l) if l == label => vec![(c.range, "b ")],
+            Command::Test(l) if l == label => vec![(c.range, "t ")],
+            _ => vec![],
+        })
     }
 
-    fn definition(&self, cmd: &[Cmd], label: &str) -> Option<Range> {
+    fn definition(cmd: &[Cmd], label: &str) -> Option<Range> {
         let mut it = cmd.iter().filter_map(|c| match &c.c {
             Command::Label(l) if l == label => Some(c.range),
-            Command::Block(cs) => self.definition(cs, label),
+            Command::Block(cs) => Self::definition(cs, label),
             _ => None,
         });
         let res = it.next();
@@ -1422,9 +1420,10 @@ impl LanguageServer for Backend {
         let pos = params.position;
         if let Some(c) = find_at(&prog.commands, &pos) {
             let res = match &c.c {
-                Command::Branch(label) | Command::Test(label) => self
-                    .definition(&prog.commands, label)
-                    .map(|range| GotoDefinitionResponse::Scalar(Location { uri, range })),
+                Command::Branch(label) | Command::Test(label) => {
+                    Self::definition(&prog.commands, label)
+                        .map(|range| GotoDefinitionResponse::Scalar(Location { uri, range }))
+                }
                 _ => None,
             };
             return Ok(res);
@@ -1444,8 +1443,7 @@ impl LanguageServer for Backend {
         if let Some(c) = find_at(&prog.commands, &pos) {
             let res = match &c.c {
                 Command::Label(label) | Command::Branch(label) | Command::Test(label) => Some(
-                    self.labels(&prog.commands, label)
-                        .into_iter()
+                    Self::labels(&prog.commands, label)
                         .map(|(range, _)| Location {
                             uri: uri.clone(),
                             range,
@@ -1473,11 +1471,11 @@ impl LanguageServer for Backend {
         if let Some(c) = find_at(&prog.commands, &pos) {
             let range = c.range;
             let hl = match &c.c {
-                Command::Label(label) | Command::Branch(label) | Command::Test(label) => self
-                    .labels(&prog.commands, label)
-                    .into_iter()
-                    .map(|(range, _)| DocumentHighlight { range, kind: None })
-                    .collect(),
+                Command::Label(label) | Command::Branch(label) | Command::Test(label) => {
+                    Self::labels(&prog.commands, label)
+                        .map(|(range, _)| DocumentHighlight { range, kind: None })
+                        .collect()
+                }
                 _ => vec![DocumentHighlight { range, kind: None }],
             };
             return Ok(Some(hl));
@@ -1521,7 +1519,7 @@ impl LanguageServer for Backend {
             .get(uri.as_str())
             .ok_or_else(|| Error::invalid_params("document not found"))?;
 
-        if self.definition(&prog.commands, &new_name).is_some() {
+        if Self::definition(&prog.commands, &new_name).is_some() {
             return Err(Error::invalid_params(format!(
                 "The label `{new_name}` is already defined."
             )));
@@ -1533,9 +1531,7 @@ impl LanguageServer for Backend {
             return Err(Error::invalid_params("Can only rename labels."));
         };
 
-        let res = self
-            .labels(&prog.commands, label)
-            .into_iter()
+        let res = Self::labels(&prog.commands, label)
             .map(|(range, tag)| TextEdit {
                 range,
                 new_text: format!("{tag}{new_name}"),
