@@ -1396,14 +1396,12 @@ impl LanguageServer for Backend {
             .programs
             .get(params.text_document.uri.as_str())
             .ok_or_else(|| Error::invalid_params("document not found"))?;
-        let pos = params.position;
-        if let Some(c) = find_at(&prog.commands, &pos) {
-            return Ok(c.hover().map(|text| Hover {
+        Ok(find_at(&prog.commands, &params.position).and_then(|c| {
+            c.hover().map(|text| Hover {
                 contents: HoverContents::Scalar(MarkedString::String(text)),
                 range: Some(c.range),
-            }));
-        }
-        Ok(None)
+            })
+        }))
     }
 
     async fn goto_definition(
@@ -1417,18 +1415,15 @@ impl LanguageServer for Backend {
             .get(uri.as_str())
             .ok_or_else(|| Error::invalid_params("document not found"))?;
 
-        let pos = params.position;
-        if let Some(c) = find_at(&prog.commands, &pos) {
-            let res = match &c.c {
+        Ok(
+            find_at(&prog.commands, &params.position).and_then(|c| match &c.c {
                 Command::Branch(label) | Command::Test(label) => {
                     Self::definition(&prog.commands, label)
                         .map(|range| GotoDefinitionResponse::Scalar(Location { uri, range }))
                 }
                 _ => None,
-            };
-            return Ok(res);
-        }
-        Ok(None)
+            }),
+        )
     }
 
     async fn references(&self, params: ReferenceParams) -> Result<Option<Vec<Location>>> {
@@ -1439,9 +1434,8 @@ impl LanguageServer for Backend {
             .get(uri.as_str())
             .ok_or_else(|| Error::invalid_params("document not found"))?;
 
-        let pos = params.position;
-        if let Some(c) = find_at(&prog.commands, &pos) {
-            let res = match &c.c {
+        Ok(
+            find_at(&prog.commands, &params.position).and_then(|c| match &c.c {
                 Command::Label(label) | Command::Branch(label) | Command::Test(label) => Some(
                     Self::labels(&prog.commands, label)
                         .map(|(range, _)| Location {
@@ -1451,10 +1445,8 @@ impl LanguageServer for Backend {
                         .collect(),
                 ),
                 _ => None,
-            };
-            return Ok(res);
-        }
-        Ok(None)
+            }),
+        )
     }
 
     async fn document_highlight(
@@ -1467,20 +1459,17 @@ impl LanguageServer for Backend {
             .get(params.text_document.uri.as_str())
             .ok_or_else(|| Error::invalid_params("document not found"))?;
 
-        let pos = params.position;
-        if let Some(c) = find_at(&prog.commands, &pos) {
+        Ok(find_at(&prog.commands, &params.position).map(|c| {
             let range = c.range;
-            let hl = match &c.c {
+            match &c.c {
                 Command::Label(label) | Command::Branch(label) | Command::Test(label) => {
                     Self::labels(&prog.commands, label)
                         .map(|(range, _)| DocumentHighlight { range, kind: None })
                         .collect()
                 }
                 _ => vec![DocumentHighlight { range, kind: None }],
-            };
-            return Ok(Some(hl));
-        }
-        Ok(None)
+            }
+        }))
     }
 
     async fn formatting(&self, params: DocumentFormattingParams) -> Result<Option<Vec<TextEdit>>> {
